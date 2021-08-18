@@ -1,60 +1,52 @@
 #include <Arduino.h>
 #include <PS4Controller.h>
+#include <AccelStepper.h>
 
-#define MIN_MOTOR_VALUE 153 // (0 - 255) With no load, 100RPM motor requires ~60% power to begin rotating. .6 * 255 = 153 (round up) Value may need to be set higher with load.
-#define MAX_MOTOR_VALUE 255 // (0 - 255) Speed limit
+#define MAX_STEP_SPEED 1000 // Max steps per second
+#define MIN_STEP_SPEED 500 // Min steps per second
+#define STEPPER_ACCEL 200 // Max steps per second per second
 
 #define DEADZONE_SIZE 15
 
-#define MOTOR_A_DIRECTION 1 // Set to -1 to reverse motor direction, instead of rewiring
-#define MOTOR_B_DIRECTION 1 
+#define MOTOR_R_DIRECTION 1 // Set to -1 to reverse motor direction, instead of rewiring
+#define MOTOR_L_DIRECTION 1 
 
-#define ENABLE_A_PIN 14 // PWM pin for Motor A (left motor)
-#define IN1_PIN 27 // Direction pin 1 for Motor A (left motor)
-#define IN2_PIN 26 // Direction pin 2 for Motor A (left motor)
-#define IN3_PIN 25 // Direction pin 1 for Motor B (right motor)
-#define IN4_PIN 33 // Direction pin 2 for Motor B (right motor)
-#define ENABLE_B_PIN 32 // PWM pin for Motor B (right motor)
+#define DIR_R 14 // Direction pin for Right motors
+#define DIR_L 32 // Direction pin for Left motors
+#define STEP_R 27 // Step pin for Right motors
+#define STEP_L 26 // Step pin for Left motors
 
 #define LED_CHANNEL_A 0
 #define LED_CHANNEL_B 1
 
 int leftStickY;
-int leftPWMOutput;
+int leftStepSpeed;
 
 int rightStickY;
-int rightPWMOutput;
+int rightStepSpeed;
 
-// Get pinout and pinin values 
 void setup()
 {
+  
+  delay(1000);
+
+  AccelStepper stepperL(AccelStepper::DRIVER,STEP_L, DIR_L);
+  AccelStepper stepperR(AccelStepper::DRIVER,STEP_R, DIR_R);
+
+  stepperL.setMaxSpeed(MAX_STEP_SPEED);
+  stepperR.setMaxSpeed(MAX_STEP_SPEED);
+  
   Serial.begin(115200);
   PS4.begin("01:02:03:04:05:06");
   Serial.println("Waiting for controller to connect to 01:02:03:04:05:06");
 
-  pinMode(IN1_PIN, OUTPUT);
-  pinMode(IN2_PIN, OUTPUT);
-  pinMode(IN3_PIN, OUTPUT);
-  pinMode(IN4_PIN, OUTPUT);
-
-  /* 
-  The ESP32 doesn't use "analogWrite()" like most basic Arduino boards.
-  Instead, you get several PWM channels, and can tie them to (almost)
-  any pin you choose. Even though this was originally meant for LEDs,
-  it works fine with motor driver boards.
-  */
-
-  ledcSetup(LED_CHANNEL_A, 30000, 8);
-  ledcAttachPin(ENABLE_A_PIN, LED_CHANNEL_A);
-  
-  ledcSetup(LED_CHANNEL_B, 30000, 8);
-  ledcAttachPin(ENABLE_B_PIN, LED_CHANNEL_B);
 }
 
 void loop()
 {
   if(PS4.isConnected())
   {
+   
     // Get raw y values from both input sticks
     leftStickY = PS4.data.analog.stick.ly;
     rightStickY = PS4.data.analog.stick.ry;
@@ -73,51 +65,61 @@ void loop()
 
     // Establish motor directions
     // "* MOTOR_X_DIRECTION" allows motor to be reversed through code instead of wiring
-    if (leftStickY * MOTOR_A_DIRECTION < 0)
+
+    if (leftStickY * MOTOR_L_DIRECTION < 0)
     {
-      digitalWrite(IN1_PIN, HIGH); // Direction A
-      digitalWrite(IN2_PIN, LOW);
+       // Direction A (Clockwise)
+       digitalWrite(DIR_L, HIGH);
     }
+   
     else
     {
-      digitalWrite(IN1_PIN, LOW); // Direction B
-      digitalWrite(IN2_PIN, HIGH);
+      // Direction B (Counterclockwise)
+      digitalWrite(DIR_L, LOW);
     }
 
-    if (rightStickY * MOTOR_B_DIRECTION < 0) 
+   
+    if (rightStickY * MOTOR_R_DIRECTION < 0) 
     {
-      digitalWrite(IN3_PIN, HIGH); // Direction A
-      digitalWrite(IN4_PIN, LOW);
+      // Direction A (Clockwise)
+      digitalWrite(DIR_R, LOW);
+
     }
+   
     else
     {
-      digitalWrite(IN3_PIN, LOW); // Direction B
-      digitalWrite(IN4_PIN, HIGH);
+      // Direction B (Counterclockwise)
+      digitalWrite(DIR_R, LOW);
     }
     
     // Convert stick position to magnitude
     leftStickY = abs(leftStickY);
     rightStickY = abs(rightStickY);
 
-    // Map stick positions to usable duty cycles
-    leftPWMOutput = map(leftStickY, DEADZONE_SIZE, 127, MIN_MOTOR_VALUE, MAX_MOTOR_VALUE);
-    rightPWMOutput = map(rightStickY, DEADZONE_SIZE, 127, MIN_MOTOR_VALUE, MAX_MOTOR_VALUE);
+    // Map stick positions to stepper speed
+    leftStepSpeed = map(leftStickY, DEADZONE_SIZE, 127, MIN_STEP_SPEED, MAX_STEP_SPEED);
+    rightStepSpeed = map(rightStickY, DEADZONE_SIZE, 127, MIN_STEP_SPEED, MAX_STEP_SPEED);
 
     // Overwrite if stick is within deadzone
     if (leftStickY < DEADZONE_SIZE)
-      leftPWMOutput = 0;
+      leftStepSpeed = 0;
 
     if (rightStickY < DEADZONE_SIZE)
-      rightPWMOutput = 0;
+      rightStepSpeed = 0;
 
-    // Establish PWM duty cycles (motor speeds)
-    ledcWrite(LED_CHANNEL_A, leftPWMOutput);
-    ledcWrite(LED_CHANNEL_B, rightPWMOutput);
+    
+    // Write stepper speeds to motors
+    stepperL.setSpeed(leftStepSpeed);
+    stepperL.runSpeed();
 
-    Serial.print("\tLeftPWM:\t");
-    Serial.print(leftPWMOutput);
-    Serial.print("\tRightPWM:\t");
-    Serial.print(rightPWMOutput);
+    stepperR.setSpeed(rightStepSpeed);
+    stepperR.runSpeed();
+
+
+    Serial.print("\tLeft Steps/Sec:\t");
+    Serial.print(leftStepSpeed);
+    Serial.print("\tRight Steps/Sec:\t");
+    Serial.print(rightStepSpeed);
   }
   else
   {
@@ -126,4 +128,5 @@ void loop()
   }
   
   delay(100);
+
 }
