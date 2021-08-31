@@ -1,0 +1,27 @@
+#include <Arduino.h>
+/*Example sketch to control a stepper motor with A4988/DRV8825 stepper motor driver and Arduino without a library. More info: https://www.makerguides.com */
+
+// Define stepper motor connections and steps per revolution:
+#define dirPin 14
+#define stepPin 27
+#define stepsPerRevolution 200
+
+int delayTime = 500;
+int dir = 0;
+
+void setup() {
+  // Declare pins as output:
+  pinMode(stepPin, OUTPUT);
+  pinMode(dirPin, OUTPUT);
+  Serial.begin(115200);
+}
+
+void loop() {
+
+  
+
+  digitalWrite(stepPin, HIGH);
+  delayMicroseconds(delayTime);
+  digitalWrite(stepPin, LOW);
+  delayMicroseconds(delayTime);
+}
