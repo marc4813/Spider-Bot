@@ -1,129 +1,114 @@
 #include <Arduino.h>
 #include <PS4Controller.h>
+/*Example sketch to control a stepper motor with A4988/DRV8825 stepper motor driver and Arduino without a library. More info: https://www.makerguides.com */
 
-#define MIN_MOTOR_VALUE 153 // (0 - 255) With no load, 100RPM motor requires ~60% power to begin rotating. .6 * 255 = 153 (round up) Value may need to be set higher with load.
-#define MAX_MOTOR_VALUE 255 // (0 - 255) Speed limit
-
+// Define stepper motor connections and steps per revolution:
+#define R_DIR 14
+#define R_STEP 27
+#define L_DIR 32
+#define L_STEP 26
+#define stepsPerRevolution 200
 #define DEADZONE_SIZE 15
+#define MAX_STEP_DELAY 2500 // Max microseconds per step (slowest speed)
+#define MIN_STEP_DELAY 300 // Min microseconds per step (fastest speed)
+#define MOTOR_R_DIRECTION 1
+#define MOTOR_L_DIRECTION 1
 
-#define MOTOR_A_DIRECTION 1 // Set to -1 to reverse motor direction, instead of rewiring
-#define MOTOR_B_DIRECTION 1 
+int delayTime = 500;
+int dir = 0;
 
-#define ENABLE_A_PIN 14 // PWM pin for Motor A (left motor)
-#define IN1_PIN 27 // Direction pin 1 for Motor A (left motor)
-#define IN2_PIN 26 // Direction pin 2 for Motor A (left motor)
-#define IN3_PIN 25 // Direction pin 1 for Motor B (right motor)
-#define IN4_PIN 33 // Direction pin 2 for Motor B (right motor)
-#define ENABLE_B_PIN 32 // PWM pin for Motor B (right motor)
+TaskHandle_t Rstep;
+TaskHandle_t Lstep;
+void WriteStepsL(void *pvParameters);
+void WriteStepsR(void *pvParameters);
+void someFunc(int isRight, int stepPin, int dirPin);
 
-#define LED_CHANNEL_A 0
-#define LED_CHANNEL_B 1
 
-int leftStickY;
-int leftPWMOutput;
+void setup() {
+  // Declare pins as output:
+  pinMode(R_DIR, OUTPUT);
+  pinMode(R_STEP, OUTPUT);
+  pinMode(L_DIR, OUTPUT);
+  pinMode(L_STEP, OUTPUT);
+    Serial.begin(115200);
+  char bluetoothMAC[] = "01:02:03:04:05:06";
+  PS4.begin(bluetoothMAC);
 
-int rightStickY;
-int rightPWMOutput;
+  xTaskCreatePinnedToCore(
+        WriteStepsR, 
+        "Write Right steps", 
+        10000,
+        NULL,
+        1,
+        &Rstep,
+        0);
 
-// Get pinout and pinin values 
-void setup()
-{
-  Serial.begin(115200);
-  PS4.begin("01:02:03:04:05:06");
-  Serial.println("Waiting for controller to connect to 01:02:03:04:05:06");
-
-  pinMode(IN1_PIN, OUTPUT);
-  pinMode(IN2_PIN, OUTPUT);
-  pinMode(IN3_PIN, OUTPUT);
-  pinMode(IN4_PIN, OUTPUT);
-
-  /* 
-  The ESP32 doesn't use "analogWrite()" like most basic Arduino boards.
-  Instead, you get several PWM channels, and can tie them to (almost)
-  any pin you choose. Even though this was originally meant for LEDs,
-  it works fine with motor driver boards.
-  */
-
-  ledcSetup(LED_CHANNEL_A, 30000, 8);
-  ledcAttachPin(ENABLE_A_PIN, LED_CHANNEL_A);
-  
-  ledcSetup(LED_CHANNEL_B, 30000, 8);
-  ledcAttachPin(ENABLE_B_PIN, LED_CHANNEL_B);
+  xTaskCreatePinnedToCore(
+        WriteStepsL, 
+        "Write Left steps", 
+        10000,
+        NULL,
+        1,
+        &Lstep,
+        1);
 }
 
 void loop()
 {
-  if(PS4.isConnected())
+
+}
+
+void WriteStepsL(void *pvParameters)
+{
+  someFunc(0, L_STEP, L_DIR);
+}
+
+void WriteStepsR(void *pvParameters)
+{
+  someFunc(1, R_STEP, R_DIR);
+}
+
+void someFunc(int isRight, int stepPin, int dirPin)
+{
+  while(1)
   {
-    // Get raw y values from both input sticks
-    leftStickY = PS4.data.analog.stick.ly;
-    rightStickY = PS4.data.analog.stick.ry;
-    
-    Serial.print("LStick: ");
-    Serial.print(leftStickY, DEC);
-    Serial.print("\t RStick: ");
-    Serial.print(rightStickY, DEC);
-
-    // Prevent values from being -128
-    if (leftStickY < 0)
-      leftStickY = leftStickY + 1;
-
-    if (rightStickY < 0)
-      rightStickY = rightStickY + 1; 
-
-    // Establish motor directions
-    // "* MOTOR_X_DIRECTION" allows motor to be reversed through code instead of wiring
-    if (leftStickY * MOTOR_A_DIRECTION < 0)
+    if(!PS4.isConnected())
     {
-      digitalWrite(IN1_PIN, HIGH); // Direction A
-      digitalWrite(IN2_PIN, LOW);
+      Serial.print("ps4 machine broke");
+      delay(100);
     }
     else
     {
-      digitalWrite(IN1_PIN, LOW); // Direction B
-      digitalWrite(IN2_PIN, HIGH);
+      int stickVal = 0;
+      if(isRight)
+        stickVal = PS4.data.analog.stick.ry;
+      else
+        stickVal = PS4.data.analog.stick.ly;
+
+      if (stickVal * (isRight ? MOTOR_R_DIRECTION : MOTOR_L_DIRECTION) > 0)
+        digitalWrite(dirPin, HIGH);
+      else
+        digitalWrite(dirPin, LOW);
+
+      if (stickVal < 0)
+         stickVal = (int) abs(stickVal + 1);
+      
+    //   // Calculate deadzone
+      if (stickVal < DEADZONE_SIZE)
+         stickVal = 0;
+
+    //   // Map stick magnitudes to stepper delays (high stick value -> low delay, low stick value -> high delay)
+      delayTime = map(max(stickVal, DEADZONE_SIZE), DEADZONE_SIZE, 128, MAX_STEP_DELAY, MIN_STEP_DELAY);
+      if(stickVal != 0)
+      {
+        digitalWrite(stepPin, HIGH);
+        delayMicroseconds(delayTime);
+        digitalWrite(stepPin, LOW);
+        delayMicroseconds(delayTime);
+      }
+      
     }
-
-    if (rightStickY * MOTOR_B_DIRECTION < 0) 
-    {
-      digitalWrite(IN3_PIN, HIGH); // Direction A
-      digitalWrite(IN4_PIN, LOW);
-    }
-    else
-    {
-      digitalWrite(IN3_PIN, LOW); // Direction B
-      digitalWrite(IN4_PIN, HIGH);
-    }
-    
-    // Convert stick position to magnitude
-    leftStickY = abs(leftStickY);
-    rightStickY = abs(rightStickY);
-
-    // Map stick positions to usable duty cycles
-    leftPWMOutput = map(leftStickY, DEADZONE_SIZE, 127, MIN_MOTOR_VALUE, MAX_MOTOR_VALUE);
-    rightPWMOutput = map(rightStickY, DEADZONE_SIZE, 127, MIN_MOTOR_VALUE, MAX_MOTOR_VALUE);
-
-    // Overwrite if stick is within deadzone
-    if (leftStickY < DEADZONE_SIZE)
-      leftPWMOutput = 0;
-
-    if (rightStickY < DEADZONE_SIZE)
-      rightPWMOutput = 0;
-
-    // Establish PWM duty cycles (motor speeds)
-    ledcWrite(LED_CHANNEL_A, leftPWMOutput);
-    ledcWrite(LED_CHANNEL_B, rightPWMOutput);
-
-    Serial.print("\tLeftPWM:\t");
-    Serial.print(leftPWMOutput);
-    Serial.print("\tRightPWM:\t");
-    Serial.print(rightPWMOutput);
-  }
-  else
-  {
-    Serial.println("Controller not connected...");
-    delay(1000);
+    vTaskDelay(1);
   }
   
-  delay(100);
 }
