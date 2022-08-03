@@ -1,2 +1,2 @@
-# Spiderbot
-Github for the Spiderbot project 
+# Spider-Bot
+Github for the Spider-Bot project 

@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <PS4Controller.h>
-/*Example sketch to control a stepper motor with A4988/DRV8825 stepper motor driver and Arduino without a library. More info: https://www.makerguides.com */
 
 // Define stepper motor connections and steps per revolution:
 #define R_DIR 14
@@ -21,7 +20,7 @@ TaskHandle_t Rstep;
 TaskHandle_t Lstep;
 void WriteStepsL(void *pvParameters);
 void WriteStepsR(void *pvParameters);
-void someFunc(int isRight, int stepPin, int dirPin);
+void writeSteps(int direction, int stepPin, int dirPin);
 
 
 void setup() {
@@ -30,62 +29,44 @@ void setup() {
   pinMode(R_STEP, OUTPUT);
   pinMode(L_DIR, OUTPUT);
   pinMode(L_STEP, OUTPUT);
-    Serial.begin(115200);
+  // Connect to PS4
+  Serial.begin(115200);
   char bluetoothMAC[] = "01:02:03:04:05:06";
   PS4.begin(bluetoothMAC);
 
-  xTaskCreatePinnedToCore(
-        WriteStepsR, 
-        "Write Right steps", 
-        10000,
-        NULL,
-        1,
-        &Rstep,
-        0);
+  // Each core on the esp-32 is responsible for each side of the robot
+  xTaskCreatePinnedToCore(WriteStepsR, "Write Right steps", 
+    10000, NULL, 1, &Rstep, 0);
 
-  xTaskCreatePinnedToCore(
-        WriteStepsL, 
-        "Write Left steps", 
-        10000,
-        NULL,
-        1,
-        &Lstep,
-        1);
+  xTaskCreatePinnedToCore(WriteStepsL, "Write Left steps", 
+    10000, NULL, 1, &Lstep, 1);
 }
 
-void loop()
-{
+void loop(){}
 
+void WriteStepsL(void *pvParameters) {
+  writeSteps(0, L_STEP, L_DIR);
 }
 
-void WriteStepsL(void *pvParameters)
-{
-  someFunc(0, L_STEP, L_DIR);
+void WriteStepsR(void *pvParameters) {
+  writeSteps(1, R_STEP, R_DIR);
 }
 
-void WriteStepsR(void *pvParameters)
-{
-  someFunc(1, R_STEP, R_DIR);
-}
-
-void someFunc(int isRight, int stepPin, int dirPin)
-{
-  while(1)
-  {
-    if(!PS4.isConnected())
-    {
-      Serial.print("ps4 machine broke");
+void writeSteps(int direction, int stepPin, int dirPin) {
+  while(true) {
+    if(!PS4.isConnected()) {
+      Serial.print("PS4 Disconnected");
       delay(100);
     }
-    else
-    {
+    else {
       int stickVal = 0;
-      if(isRight)
+      // Get input from ps4 controller
+      if(direction)
         stickVal = PS4.data.analog.stick.ry;
       else
         stickVal = PS4.data.analog.stick.ly;
 
-      if (stickVal * (isRight ? MOTOR_R_DIRECTION : MOTOR_L_DIRECTION) > 0)
+      if (stickVal * (direction ? MOTOR_R_DIRECTION : MOTOR_L_DIRECTION) > 0)
         digitalWrite(dirPin, HIGH);
       else
         digitalWrite(dirPin, LOW);
@@ -93,14 +74,13 @@ void someFunc(int isRight, int stepPin, int dirPin)
       if (stickVal < 0)
          stickVal = (int) abs(stickVal + 1);
       
-    //   // Calculate deadzone
+     // Calculate deadzone
       if (stickVal < DEADZONE_SIZE)
          stickVal = 0;
 
-    //   // Map stick magnitudes to stepper delays (high stick value -> low delay, low stick value -> high delay)
+     // Map stick magnitudes to stepper delays (high stick value -> low delay, low stick value -> high delay)
       delayTime = map(max(stickVal, DEADZONE_SIZE), DEADZONE_SIZE, 128, MAX_STEP_DELAY, MIN_STEP_DELAY);
-      if(stickVal != 0)
-      {
+      if(stickVal != 0) {
         digitalWrite(stepPin, HIGH);
         delayMicroseconds(delayTime);
         digitalWrite(stepPin, LOW);
